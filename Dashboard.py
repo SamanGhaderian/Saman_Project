@@ -15,16 +15,23 @@ app = dash.Dash(__name__)
 # =========================
 app.layout = html.Div([
 
-    html.H2("ICU Signal Dashboard (Lean Cached Version)"),
+    html.H2("ICU Multi-Patient Comparison (Window Cache Only)"),
 
-    dcc.Input(
-        id="patient-path",
-        type="text",
-        placeholder="Enter patient folder path",
-        style={"width": "60%"}
-    ),
+    html.Div([
+        html.Label("Patient 1 Path"),
+        dcc.Input(id="patient1-path", type="text", style={"width": "45%"})
+    ]),
 
-    html.Button("Load Patient", id="load-btn"),
+    html.Br(),
+
+    html.Div([
+        html.Label("Patient 2 Path"),
+        dcc.Input(id="patient2-path", type="text", style={"width": "45%"})
+    ]),
+
+    html.Br(),
+
+    html.Button("Load Patients", id="load-btn"),
 
     html.Br(), html.Br(),
 
@@ -49,65 +56,76 @@ app.layout = html.Div([
 
     dcc.Graph(id="signal-plot"),
 
-    html.Div(id="output-text", style={"marginTop": "20px", "fontSize": 18})
+    html.Div(id="output-text")
 ])
 
 
 # =========================
-# LOAD PATIENT
+# LOAD PATIENTS (NO FULL CACHE)
 # =========================
 @app.callback(
     Output("channel-dropdown", "options"),
     Input("load-btn", "n_clicks"),
-    State("patient-path", "value")
+    State("patient1-path", "value"),
+    State("patient2-path", "value")
 )
-def load_patient(n_clicks, patient_path):
+def load_patients(n_clicks, p1, p2):
 
-    if not patient_path:
+    if not p1 or not p2:
         return []
 
-    df = load_patient_data(patient_path)
+    df1 = load_patient_data(p1)
+    df2 = load_patient_data(p2)
 
-    channels = [c for c in df.columns if c != "time"]
+    channels = set(df1.columns).intersection(set(df2.columns))
+    channels.discard("time")
 
-    return [{"label": ch, "value": ch} for ch in channels]
+    return [{"label": c, "value": c} for c in sorted(channels)]
 
 
 # =========================
-# UPDATE PLOT
+# PLOT (WINDOW CACHE ONLY)
 # =========================
 @app.callback(
     Output("signal-plot", "figure"),
     Output("output-text", "children"),
     Input("channel-dropdown", "value"),
     Input("mode", "value"),
-    State("patient-path", "value")
+    State("patient1-path", "value"),
+    State("patient2-path", "value")
 )
-def update_plot(channel, mode, patient_path):
+def update_plot(channel, mode, p1, p2):
 
-    if not channel or not patient_path:
+    if not channel or not p1 or not p2:
         return {}, ""
 
-    df = load_patient_data(patient_path)
-    patient_id = os.path.basename(patient_path)
+    df1 = load_patient_data(p1)
+    df2 = load_patient_data(p2)
+
+    id1 = os.path.basename(p1)
+    id2 = os.path.basename(p2)
 
     window_size = int(mode)
 
-    df_windowed = get_resampled_windows(
-        patient_id,
-        df,
-        window_size
-    )
+    df1_w = get_resampled_windows(id1, df1, window_size)
+    df2_w = get_resampled_windows(id2, df2, window_size)
 
     fig = go.Figure()
+
     fig.add_trace(go.Scatter(
-        x=df_windowed["time"],
-        y=df_windowed[channel],
-        mode="lines"
+        x=df1_w["time"],
+        y=df1_w[channel],
+        name="Patient 1"
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=df2_w["time"],
+        y=df2_w[channel],
+        name="Patient 2"
     ))
 
     fig.update_layout(
-        title=f"{window_size}-Second Windowed Signal - {channel}",
+        title=f"{window_size}s Window Comparison - {channel}",
         xaxis_title="Time (seconds)",
         yaxis_title="Mean Amplitude"
     )
@@ -116,7 +134,7 @@ def update_plot(channel, mode, patient_path):
 
 
 # =========================
-# RUN APP
+# RUN
 # =========================
 if __name__ == "__main__":
     app.run(debug=True)

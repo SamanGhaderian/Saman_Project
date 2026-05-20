@@ -23,9 +23,10 @@ def get_patient_records(patient_path):
 
 
 # =========================
-# LOAD FULL PATIENT DATA (NO CACHE)
+# LOAD PATIENT (NO CACHE)
 # =========================
 def load_patient_data(patient_path):
+
     records = get_patient_records(patient_path)
 
     all_data = []
@@ -55,8 +56,7 @@ def load_patient_data(patient_path):
 
             all_data.append(df)
 
-            segment_duration = len(signals) / fs
-            cumulative_time += segment_duration
+            cumulative_time += len(signals) / fs
 
         except Exception as e:
             print(f"Skipping {record_name}: {e}")
@@ -65,7 +65,7 @@ def load_patient_data(patient_path):
 
 
 # =========================
-# RESAMPLE WINDOWS (CACHED)
+# WINDOW CACHE ONLY
 # =========================
 def get_resampled_windows(patient_id, df, window_size):
 
@@ -79,7 +79,7 @@ def get_resampled_windows(patient_id, df, window_size):
 
 
 # =========================
-# RESAMPLE FUNCTION
+# RESAMPLING
 # =========================
 def resample_windows(df, window_size):
 
