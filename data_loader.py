@@ -4,6 +4,8 @@ import wfdb
 import numpy as np
 import pandas as pd
 
+from disk_cache import get_or_create
+
 
 # =========================
 # CLEAN RECORD LIST
@@ -21,14 +23,12 @@ def get_patient_records(patient_path):
 
 
 # =========================
-# LOAD FULL PATIENT WITH
-# CONTINUOUS TIME
+# LOAD FULL PATIENT DATA (NO CACHE)
 # =========================
 def load_patient_data(patient_path):
     records = get_patient_records(patient_path)
 
     all_data = []
-
     cumulative_time = 0
 
     for record_name in records:
@@ -39,13 +39,15 @@ def load_patient_data(patient_path):
             record = wfdb.rdrecord(record_path)
 
             fs = record.fs
-            signals = record.p_signal
-            names = record.sig_name
+            signals = np.array(record.p_signal)
+            names = list(record.sig_name)
 
-            # local segment time
+            # safety alignment
+            n_channels = min(signals.shape[1], len(names))
+            signals = signals[:, :n_channels]
+            names = names[:n_channels]
+
             local_time = np.arange(len(signals)) / fs
-
-            # global continuous time
             global_time = local_time + cumulative_time
 
             df = pd.DataFrame(signals, columns=names)
@@ -53,31 +55,40 @@ def load_patient_data(patient_path):
 
             all_data.append(df)
 
-            # update cumulative offset
             segment_duration = len(signals) / fs
             cumulative_time += segment_duration
-
-            print(f"Loaded {record_name} "
-                  f"({segment_duration:.2f}s) "
-                  f"→ total: {cumulative_time:.2f}s")
 
         except Exception as e:
             print(f"Skipping {record_name}: {e}")
 
-    full_df = pd.concat(all_data, ignore_index=True)
+    return pd.concat(all_data, ignore_index=True)
 
-    return full_df
+
+# =========================
+# RESAMPLE WINDOWS (CACHED)
+# =========================
+def get_resampled_windows(patient_id, df, window_size):
+
+    mode = f"resample_{window_size}s"
+
+    return get_or_create(
+        patient_id=patient_id,
+        mode=mode,
+        builder_func=lambda: resample_windows(df, window_size)
+    )
+
+
+# =========================
+# RESAMPLE FUNCTION
+# =========================
 def resample_windows(df, window_size):
 
     df = df.copy()
 
-    # assign each row to a window index
     df["window"] = (df["time"] // window_size).astype(int)
 
-    # group by window
     grouped = df.groupby("window").mean(numeric_only=True)
 
-    # reconstruct time as window start
     grouped["time"] = grouped.index * window_size
 
     return grouped.reset_index(drop=True)

@@ -3,10 +3,9 @@ from dash import dcc, html
 from dash.dependencies import Input, Output, State
 
 import plotly.graph_objs as go
-import numpy as np
+import os
 
-from data_loader import load_patient_data, resample_windows
-from cache import get_from_cache, set_cache
+from data_loader import load_patient_data, get_resampled_windows
 
 app = dash.Dash(__name__)
 
@@ -16,7 +15,7 @@ app = dash.Dash(__name__)
 # =========================
 app.layout = html.Div([
 
-    html.H2("ICU Signal Dashboard (v4 - Continuous Timeline)"),
+    html.H2("ICU Signal Dashboard (Lean Cached Version)"),
 
     dcc.Input(
         id="patient-path",
@@ -39,10 +38,8 @@ app.layout = html.Div([
     dcc.RadioItems(
         id="mode",
         options=[
-            {"label": "Full Signal", "value": "full"},
             {"label": "5 Second Windows", "value": "5"},
             {"label": "30 Second Windows", "value": "30"},
-            {"label": "Average", "value": "avg"},
         ],
         value="5",
         labelStyle={"display": "inline-block", "margin-right": "15px"}
@@ -69,13 +66,7 @@ def load_patient(n_clicks, patient_path):
     if not patient_path:
         return []
 
-    key = f"patient_{patient_path}"
-
-    df = get_from_cache(key)
-
-    if df is None:
-        df = load_patient_data(patient_path)
-        set_cache(key, df)
+    df = load_patient_data(patient_path)
 
     channels = [c for c in df.columns if c != "time"]
 
@@ -97,50 +88,16 @@ def update_plot(channel, mode, patient_path):
     if not channel or not patient_path:
         return {}, ""
 
-    key = f"patient_{patient_path}"
-    df = get_from_cache(key)
+    df = load_patient_data(patient_path)
+    patient_id = os.path.basename(patient_path)
 
-    if df is None:
-        df = load_patient_data(patient_path)
-        set_cache(key, df)
-
-    time = df["time"]
-    signal = df[channel]
-
-    # =========================
-    # MODE: AVG
-    # =========================
-    if mode == "avg":
-        avg = signal.mean()
-        return {}, f"Average {channel}: {avg:.4f}"
-
-
-    # =========================
-    # MODE: FULL SIGNAL
-    # =========================
-    if mode == "full":
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(
-            x=time,
-            y=signal,
-            mode="lines"
-        ))
-
-        fig.update_layout(
-            title=f"Full ICU Signal - {channel}",
-            xaxis_title="Time (seconds)",
-            yaxis_title="Amplitude"
-        )
-
-        return fig, ""
-
-
-    # =========================
-    # MODE: WINDOWED (5s / 30s)
-    # =========================
     window_size = int(mode)
 
-    df_windowed = resample_windows(df, window_size)
+    df_windowed = get_resampled_windows(
+        patient_id,
+        df,
+        window_size
+    )
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
