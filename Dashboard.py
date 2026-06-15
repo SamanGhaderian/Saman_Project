@@ -5,20 +5,23 @@ import plotly.graph_objs as go
 import os
 
 from data_loader import load_patient_windows
+from similarity import build_similarity_matrix
+from clustering import hierarchical_clustering
+from embedding import compute_umap
 
 
 CACHE_ROOT = "cache"
 
 
 # =========================
-# PATIENT VALIDATION SYSTEM
+# VALIDATION
 # =========================
 def validate_patients():
     valid = []
     invalid = []
 
     if not os.path.exists(CACHE_ROOT):
-        return [], ["Cache folder not found"]
+        return [], ["Cache missing"]
 
     for p in os.listdir(CACHE_ROOT):
 
@@ -27,20 +30,11 @@ def validate_patients():
         if not os.path.isdir(patient_path):
             continue
 
-        files = os.listdir(patient_path)
-
-        # must have at least one parquet file
-        parquet_files = [f for f in files if f.endswith(".parquet")]
-
-        if len(parquet_files) == 0:
-            invalid.append((p, "No parquet files"))
-            continue
-
-        # check at least one usable file
         try:
             df = load_patient_windows(p, "5s")
+
             if df is None or df.empty:
-                invalid.append((p, "Empty dataset"))
+                invalid.append((p, "Empty"))
             else:
                 valid.append(p)
 
@@ -64,32 +58,16 @@ app = dash.Dash(__name__)
 # =========================
 app.layout = html.Div([
 
-    html.H2("ICU Multi-Patient Dashboard (Validated Cache System)"),
-
-    # =========================
-    # PATIENT SELECTOR
-    # =========================
-    html.Label("Select Valid Patients"),
+    html.H2("ICU Dashboard (DTW + Clustering + UMAP)"),
 
     dcc.Dropdown(
         id="patient-selector",
-        options=[
-            {
-                "label": p,
-                "value": p,
-                "title": "Valid patient (cached and ready)"  # tooltip
-            }
-            for p in VALID_PATIENTS
-        ],
-        multi=True,
-        placeholder="Only validated patients shown"
+        options=[{"label": p, "value": p} for p in VALID_PATIENTS],
+        multi=True
     ),
 
     html.Br(),
 
-    # =========================
-    # CHANNEL SELECTOR
-    # =========================
     dcc.Dropdown(
         id="channel-dropdown",
         placeholder="Select signal"
@@ -97,66 +75,31 @@ app.layout = html.Div([
 
     html.Br(),
 
-    # =========================
-    # MODE
-    # =========================
     dcc.RadioItems(
         id="mode",
         options=[
-            {"label": "5 Second Windows", "value": "5"},
-            {"label": "30 Second Windows", "value": "30"},
+            {"label": "5s", "value": "5"},
+            {"label": "30s", "value": "30"}
         ],
-        value="5",
-        labelStyle={"display": "inline-block", "margin-right": "15px"}
+        value="5"
     ),
-
-    html.Br(),
-
-    # =========================
-    # TIME MODE
-    # =========================
-    dcc.RadioItems(
-        id="time-mode",
-        options=[
-            {"label": "Absolute Time", "value": "absolute"},
-            {"label": "Normalized Time (0–1)", "value": "normalized"},
-        ],
-        value="normalized",
-        labelStyle={"display": "inline-block", "margin-right": "15px"}
-    ),
-
-    html.Br(),
-
-    # =========================
-    # LOADING STATUS PANEL
-    # =========================
-    html.Div(id="loading-status", style={
-        "whiteSpace": "pre-line",
-        "backgroundColor": "#f4f4f4",
-        "padding": "10px",
-        "borderRadius": "8px"
-    }),
-
-    html.Br(),
-
-    # =========================
-    # SKIP REPORT PANEL
-    # =========================
-    html.Div([
-        html.H4("Skipped / Invalid Patients"),
-        html.Div([
-            html.Div(f"{p} → {reason}") for p, reason in INVALID_PATIENTS
-        ])
-    ], style={
-        "backgroundColor": "#fff3f3",
-        "padding": "10px",
-        "border": "1px solid #ffcccc",
-        "borderRadius": "8px"
-    }),
 
     html.Br(),
 
     dcc.Graph(id="signal-plot"),
+
+    html.Br(),
+
+    html.Button("Run DTW + Clustering + UMAP", id="run"),
+
+    html.Br(),
+    html.Br(),
+
+    html.Div(id="output"),
+
+    html.Br(),
+
+    dcc.Graph(id="umap-plot")
 ])
 
 
@@ -167,16 +110,16 @@ app.layout = html.Div([
     Output("channel-dropdown", "options"),
     Input("patient-selector", "value")
 )
-def load_channels(selected):
+def channels(patients):
 
-    if not selected or len(selected) < 2:
+    if not patients:
         return []
 
     dfs = []
 
-    for p in selected[:2]:
+    for p in patients[:2]:
         df = load_patient_windows(p, "5s")
-        if df is not None and not df.empty:
+        if df is not None:
             dfs.append(df)
 
     if len(dfs) < 2:
@@ -184,82 +127,132 @@ def load_channels(selected):
 
     common = set(dfs[0].columns)
 
-    for df in dfs[1:]:
-        common = common.intersection(set(df.columns))
+    for d in dfs:
+        common &= set(d.columns)
 
     common.discard("time")
 
-    return [{"label": c, "value": c} for c in sorted(common)]
+    return [{"label": c, "value": c} for c in common]
 
 
 # =========================
-# PLOT + LOADING STATUS
+# SIGNAL PLOT
 # =========================
 @app.callback(
     Output("signal-plot", "figure"),
-    Output("loading-status", "children"),
     Input("patient-selector", "value"),
     Input("channel-dropdown", "value"),
-    Input("mode", "value"),
-    Input("time-mode", "value")
+    Input("mode", "value")
 )
-def update_plot(patients, channel, mode, time_mode):
-
-    if not patients or not channel:
-        return {}, "No patients selected"
+def plot(patients, channel, mode):
 
     fig = go.Figure()
 
-    status_lines = []
+    if not patients or not channel:
+        return fig
 
     for p in patients:
 
-        try:
-            df = load_patient_windows(p, f"{mode}s")
+        df = load_patient_windows(p, f"{mode}s")
 
-            if df is None or df.empty:
-                status_lines.append(f"❌ {p}: empty dataset")
-                continue
+        if df is None or df.empty:
+            continue
 
-            if channel not in df.columns:
-                status_lines.append(f"⚠️ {p}: missing channel {channel}")
-                continue
+        if channel not in df:
+            continue
 
-            df = df.copy()
+        fig.add_trace(go.Scatter(
+            x=df["time"],
+            y=df[channel],
+            name=p
+        ))
 
-            # =========================
-            # TIME NORMALIZATION
-            # =========================
-            if time_mode == "normalized":
-                tmin, tmax = df["time"].min(), df["time"].max()
+    return fig
 
-                if tmax == tmin:
-                    status_lines.append(f"⚠️ {p}: invalid time range")
-                    continue
 
-                df["time"] = (df["time"] - tmin) / (tmax - tmin)
+# =========================
+# MAIN PIPELINE (DTW + CLUSTER + UMAP)
+# =========================
+@app.callback(
+    Output("output", "children"),
+    Output("umap-plot", "figure"),
+    Input("run", "n_clicks"),
+    State("patient-selector", "value"),
+    State("channel-dropdown", "value"),
+    State("mode", "value")
+)
+def run(n, patients, channel, mode):
 
-            else:
-                df["time"] = df["time"] - df["time"].min()
+    if not n:
+        return "", {}
 
-            fig.add_trace(go.Scatter(
-                x=df["time"],
-                y=df[channel],
-                name=f"Patient {p}"
-            ))
+    if not patients or not channel:
+        return "Select inputs", {}
 
-            status_lines.append(f"✅ {p}: loaded")
-
-        except Exception as e:
-            status_lines.append(f"❌ {p}: error {str(e)}")
-
-    fig.update_layout(
-        title=f"{mode}s Window - {channel} ({time_mode})",
-        xaxis_title="Time",
-        yaxis_title="Value"
+    # =========================
+    # STEP 1: DTW
+    # =========================
+    ids, matrix = build_similarity_matrix(
+        patients, channel, f"{mode}s"
     )
 
-    return fig, "\n".join(status_lines)
+    if len(ids) < 2:
+        return "Not enough data", {}
+
+    # =========================
+    # STEP 2: CLUSTERING
+    # =========================
+    clusters, labels = hierarchical_clustering(matrix, ids)
+
+    # =========================
+    # STEP 3: UMAP
+    # =========================
+    embedding = compute_umap(matrix)
+
+    # =========================
+    # TEXT OUTPUT
+    # =========================
+    out = ["=== CLUSTERS ===\n"]
+
+    for k, v in clusters.items():
+        out.append(f"Cluster {k}: {', '.join(v)}")
+
+    # =========================
+    # COLOR MAP (OPTION A)
+    # =========================
+    unique_labels = list(sorted(set(labels)))
+
+    color_map = {
+        label: idx for idx, label in enumerate(unique_labels)
+    }
+
+    # =========================
+    # UMAP PLOT (COLORED)
+    # =========================
+    fig = go.Figure()
+
+    for i, pid in enumerate(ids):
+
+        cluster_id = labels[i]
+
+        fig.add_trace(go.Scatter(
+            x=[embedding[i, 0]],
+            y=[embedding[i, 1]],
+            mode="markers+text",
+            text=[pid],
+            textposition="top center",
+            marker=dict(size=12),
+            name=f"Cluster {cluster_id}",
+            showlegend=True
+        ))
+
+    fig.update_layout(
+        title="ICU Patient Similarity Map (UMAP)",
+        xaxis_title="UMAP-1",
+        yaxis_title="UMAP-2"
+    )
+
+    return "\n".join(out), fig
 
 
 # =========================

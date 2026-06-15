@@ -68,7 +68,7 @@ def load_patient_data(patient_path):
             signals = signals[:, :n_channels]
             names = names[:n_channels]
 
-            # 🔥 CRITICAL FIX: force UNIQUE column names
+            #CRITICAL FIX: force UNIQUE column names
             seen = {}
             clean_names = []
 
@@ -101,7 +101,7 @@ def load_patient_data(patient_path):
     if len(all_data) == 0:
         return pd.DataFrame()
 
-    # 🔥 SAFE CONCAT (important)
+    #SAFE CONCAT (important)
     return pd.concat(all_data, ignore_index=True, sort=False, verify_integrity=False)
 
 # =========================
