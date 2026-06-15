@@ -1,225 +1,144 @@
-🏥 ICU Multi-Patient Similarity & Clustering Dashboard
-Overview
+# 🏥 ICU Multi-Patient Similarity & Clustering Dashboard
 
-This project is an interactive ICU analytics dashboard that enables multi-patient physiological similarity analysis using time-series methods. It combines:
+## 📌 Overview
 
-Signal preprocessing
-Dynamic Time Warping (DTW)
-Hierarchical clustering
-UMAP dimensionality reduction
-Interactive visualization (Dash + Plotly)
+This project is an interactive ICU analytics dashboard for analyzing multi-patient physiological time-series data.  
+It combines **signal processing, Dynamic Time Warping (DTW), clustering, and UMAP visualization** to discover hidden patterns in ICU patients.
 
-The system allows exploration of ICU patient cohorts and discovery of hidden physiological patterns and clusters.
+The system enables:
+- Multi-patient signal visualization
+- Patient similarity computation
+- Unsupervised clustering of patients
+- 2D ICU population mapping
 
-🎯 Project Goal
+---
 
-To transform raw ICU time-series data into:
+## 🎯 Goal
 
-A structured, visual representation of patient similarity and group behavior.
+Transform raw ICU time-series data into:
 
-This enables:
+> A structured, visual representation of patient similarity and group behavior.
 
-Patient similarity comparison
-Cluster discovery (phenotype-like grouping)
-Visual ICU population mapping
-Exploratory medical data analysis
-🧠 Methods Used
-1. Signal Preprocessing
+---
 
-Each patient time-series is:
+## 🧠 Methods Used
 
-Loaded from WFDB records
-Concatenated across multiple records
-Converted into continuous time-series
-Windowed into fixed intervals (5s / 30s)
-Normalized and resampled to fixed length (300 points)
-Purpose:
+### 1. Signal Preprocessing
+- WFDB records loaded per patient
+- Multiple records concatenated
+- Windowing applied (5s / 30s)
+- Signals normalized to fixed length (300 points)
 
-Ensure uniform input size for all downstream algorithms.
+---
 
-2. Dynamic Time Warping (DTW)
+### 2. Dynamic Time Warping (DTW)
+DTW is used to compute similarity between time-series by aligning them in time.
 
-DTW is used to measure similarity between two time-series.
+- Handles time shifts in physiological signals
+- Produces a pairwise distance between patients
 
-Key idea:
-
-It aligns signals by allowing non-linear time shifts.
-
-Example:
-
-Patient A heart rate may rise earlier than Patient B
-DTW aligns them before measuring distance
 Output:
+- `N × N` similarity matrix
 
-A pairwise distance matrix between all patients.
+---
 
-3. Similarity Matrix Construction
+### 3. Similarity Matrix
+A full matrix is built:
 
-For N patients:
 
-Compute DTW distance for every pair
-Build an N × N symmetric matrix
-Output:
+D[i][j] = DTW(patient_i, patient_j)
 
-A full ICU patient-to-patient similarity graph
 
-4. Hierarchical Clustering
+Represents ICU patient-to-patient distances.
 
-We apply:
+---
 
+### 4. Hierarchical Clustering
+Using:
+
+```python
 AgglomerativeClustering(metric="precomputed")
-Method:
-Uses DTW distance matrix
-Merges closest patients iteratively
-Forms hierarchical groups
-Output:
-Patient cluster labels
-Grouped patient cohorts
-5. UMAP Dimensionality Reduction
-
-We use:
-
-UMAP(metric="precomputed")
-Purpose:
-
-Project high-dimensional DTW space into 2D.
+Groups patients based on DTW distance
+Produces cluster labels
 
 Output:
-2D patient embeddings
-Preserves neighborhood structure
-6. Visualization Layer
 
-Built using Plotly + Dash
+Patient clusters (groups)
+5. UMAP Embedding
 
-Features:
-Multi-patient signal visualization
-Interactive selection of channels
-ICU similarity map (UMAP)
-Cluster-based coloring
-Real-time analysis button
+UMAP is applied on the DTW matrix:
+
+Reduces high-dimensional similarity space to 2D
+Preserves local structure
+
+Output:
+
+ICU 2D patient map
 ⚙️ System Architecture
 Raw WFDB Data
       ↓
-Patient Loader
+Preprocessing (windowing + normalization)
       ↓
-Windowing (5s / 30s)
+Fixed-length time series (300 points)
       ↓
-Normalization (fixed-length 300)
+DTW pairwise computation
       ↓
-DTW Pairwise Distance Computation
+Similarity matrix
       ↓
-Similarity Matrix
+├── Hierarchical clustering
+└── UMAP projection
       ↓
-├── Hierarchical Clustering
-└── UMAP Projection
-      ↓
-Interactive Dashboard (Dash + Plotly)
-🚀 Key Improvements Implemented
-🔴 1. Performance Fix (Critical)
-
-Before:
-
-Full-length raw signals used in DTW
-Extremely slow computation (minutes per run)
-
-After:
-
-Fixed-length signals (300 points)
-Downsampling + interpolation
-Stable and fast execution
-🔴 2. Stable DTW Pipeline
-
-Before:
-
-Uncontrolled computation cost
-Risk of freezing UI
-
-After:
-
-Deterministic runtime per comparison
-Safe bounded computation
-🔴 3. Scalable Similarity Matrix
-
-Before:
-
-No controlled preprocessing
-
-After:
-
-Centralized similarity matrix builder
-Reusable DTW results
-🔴 4. Clustering Integration
-
-Before:
-
-No grouping logic
-
-After:
-
-Hierarchical clustering using DTW distances
-Automatic patient grouping
-🔴 5. ICU Embedding Visualization (UMAP)
-
-Before:
-
-Only raw signal plots
-
-After:
-
-2D ICU patient map
-Cluster-based spatial structure
-Visual interpretation of similarity
-🔴 6. Full Analytical Pipeline
-
-The system evolved from:
-
-Visualization tool → Analytical ICU intelligence system
-
-Now supports:
-
-Signal analysis
-Similarity computation
-Group discovery
-Visual embedding
-📊 Current Features
-✔ Multi-patient signal visualization
-✔ Channel selection
-✔ Time-window selection (5s / 30s)
-✔ DTW similarity computation
-✔ Hierarchical clustering
-✔ UMAP ICU map visualization
-✔ Cluster-colored patient embedding
-📦 Dependencies
+Dash visualization layer
+🚀 Features
+Multi-patient selection
+Signal plotting (ABP, HR, etc.)
+Time mode selection (absolute / normalized)
+DTW-based similarity computation
+Hierarchical clustering
+UMAP ICU map visualization
+Cluster-based coloring
+📦 Installation
 pip install numpy pandas wfdb dash plotly scikit-learn umap-learn
-🧪 Example Use Case
-Select ICU patients
-Choose signal (e.g., ABP)
-Click Run DTW + Clustering + UMAP
-System outputs:
-Patient clusters
+▶️ How to Run
+python Dashboard.py
+
+Then open the local Dash server link.
+
+📊 Workflow
+Select patients
+Select signal (e.g., ABP)
+
+Click:
+
+Run DTW + Clustering + UMAP
+View:
+Cluster results
 ICU similarity map
-Visual grouping of physiological patterns
-📌 Scientific Contribution
+📈 Outputs
+1. Clusters
 
-This project demonstrates:
+Groups of similar patients based on physiological behavior.
 
-Application of time-series similarity (DTW) in ICU data
-Use of unsupervised clustering for patient grouping
-Dimensionality reduction for medical population visualization
-Integration into an interactive clinical decision-support dashboard
-⚠️ Limitations (Current Stage)
-DTW still computationally expensive for large datasets
-No real-time streaming support yet
-No clinical labeling (unsupervised only)
-UMAP embedding is stochastic (minor variation possible)
-🚀 Future Work
-FastDTW or Soft-DTW integration
-Feature-based hybrid modeling
+2. UMAP Map
+
+2D visualization of ICU population structure.
+
+Each point represents a patient:
+
+Distance ≈ similarity
+Color = cluster membership
+⚠️ Limitations
+DTW is still computationally expensive
+UMAP is stochastic (small variations per run)
+Only unsupervised learning (no clinical labels)
+🔮 Future Improvements
+FastDTW / Soft-DTW optimization
+Feature-based modeling (instead of raw signals)
 Real-time ICU streaming support
-Predictive risk scoring layer
-Model validation against clinical outcomes
+Risk prediction layer
+Clinical validation
 👨‍💻 Author
 
 Saman Ghaderian
-Master’s Student — Software Technology
+Master’s in Software Technology
 HFT Stuttgart
