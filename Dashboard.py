@@ -1,12 +1,16 @@
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
+import numpy as np
 import plotly.graph_objs as go
 import os
 
 from data_loader import load_patient_windows
 from similarity import build_similarity_matrix
-from clustering import hierarchical_clustering
+from clustering import (
+    hierarchical_clustering,
+    dbscan_clustering
+)
 from embedding import compute_umap
 
 
@@ -16,7 +20,9 @@ CACHE_ROOT = "cache"
 # =========================
 # VALIDATION
 # =========================
+
 def validate_patients():
+
     valid = []
     invalid = []
 
@@ -31,232 +37,536 @@ def validate_patients():
             continue
 
         try:
-            df = load_patient_windows(p, "5s")
+
+            df = load_patient_windows(
+                p,
+                "5s"
+            )
 
             if df is None or df.empty:
-                invalid.append((p, "Empty"))
+                invalid.append(
+                    (p, "Empty")
+                )
+
             else:
                 valid.append(p)
 
         except Exception as e:
-            invalid.append((p, str(e)))
+
+            invalid.append(
+                (p, str(e))
+            )
+
 
     return valid, invalid
+
 
 
 VALID_PATIENTS, INVALID_PATIENTS = validate_patients()
 
 
+
 # =========================
 # APP
 # =========================
+
 app = dash.Dash(__name__)
+
 
 
 # =========================
 # LAYOUT
 # =========================
+
 app.layout = html.Div([
 
-    html.H2("ICU Dashboard (DTW + Clustering + UMAP)"),
+
+    html.H2(
+        "ICU Dashboard (DTW + Clustering + UMAP)"
+    ),
+
 
     dcc.Dropdown(
         id="patient-selector",
-        options=[{"label": p, "value": p} for p in VALID_PATIENTS],
+        options=[
+            {
+                "label": p,
+                "value": p
+            }
+            for p in VALID_PATIENTS
+        ],
         multi=True
     ),
 
+
     html.Br(),
+
 
     dcc.Dropdown(
         id="channel-dropdown",
         placeholder="Select signal"
     ),
 
+
     html.Br(),
+
 
     dcc.RadioItems(
         id="mode",
         options=[
-            {"label": "5s", "value": "5"},
-            {"label": "30s", "value": "30"}
+            {
+                "label": "5s",
+                "value": "5"
+            },
+            {
+                "label": "30s",
+                "value": "30"
+            }
         ],
         value="5"
     ),
 
-    html.Br(),
-
-    dcc.Graph(id="signal-plot"),
 
     html.Br(),
 
-    html.Button("Run DTW + Clustering + UMAP", id="run"),
+
+    dcc.RadioItems(
+        id="cluster-method",
+
+        options=[
+
+            {
+                "label": "Hierarchical Clustering",
+                "value": "hierarchical"
+            },
+
+            {
+                "label": "DBSCAN",
+                "value": "dbscan"
+            }
+
+        ],
+
+        value="hierarchical"
+    ),
+
+
+    html.Br(),
+
+
+    dcc.Graph(
+        id="signal-plot"
+    ),
+
+
+    html.Br(),
+
+
+    html.Button(
+        "Run DTW + Clustering + UMAP",
+        id="run"
+    ),
+
 
     html.Br(),
     html.Br(),
 
-    html.Div(id="output"),
+
+    html.Div(
+        id="output"
+    ),
+
 
     html.Br(),
 
-    dcc.Graph(id="umap-plot")
+
+    dcc.Graph(
+        id="umap-plot"
+    )
+
 ])
+
 
 
 # =========================
 # CHANNEL OPTIONS
 # =========================
+
 @app.callback(
-    Output("channel-dropdown", "options"),
-    Input("patient-selector", "value")
+    Output(
+        "channel-dropdown",
+        "options"
+    ),
+
+    Input(
+        "patient-selector",
+        "value"
+    )
 )
+
 def channels(patients):
+
 
     if not patients:
         return []
 
+
     dfs = []
 
+
     for p in patients[:2]:
-        df = load_patient_windows(p, "5s")
+
+        df = load_patient_windows(
+            p,
+            "5s"
+        )
+
         if df is not None:
             dfs.append(df)
+
+
 
     if len(dfs) < 2:
         return []
 
-    common = set(dfs[0].columns)
+
+
+    common = set(
+        dfs[0].columns
+    )
+
 
     for d in dfs:
-        common &= set(d.columns)
+        common &= set(
+            d.columns
+        )
 
-    common.discard("time")
 
-    return [{"label": c, "value": c} for c in common]
+    common.discard(
+        "time"
+    )
+
+
+    return [
+        {
+            "label": c,
+            "value": c
+        }
+
+        for c in sorted(common)
+    ]
+
 
 
 # =========================
 # SIGNAL PLOT
 # =========================
+
 @app.callback(
-    Output("signal-plot", "figure"),
-    Input("patient-selector", "value"),
-    Input("channel-dropdown", "value"),
-    Input("mode", "value")
+    Output(
+        "signal-plot",
+        "figure"
+    ),
+
+    Input(
+        "patient-selector",
+        "value"
+    ),
+
+    Input(
+        "channel-dropdown",
+        "value"
+    ),
+
+    Input(
+        "mode",
+        "value"
+    )
 )
-def plot(patients, channel, mode):
+
+def plot(
+    patients,
+    channel,
+    mode
+):
 
     fig = go.Figure()
+
 
     if not patients or not channel:
         return fig
 
+
+
     for p in patients:
 
-        df = load_patient_windows(p, f"{mode}s")
+
+        df = load_patient_windows(
+            p,
+            f"{mode}s"
+        )
+
 
         if df is None or df.empty:
             continue
 
+
         if channel not in df:
             continue
 
-        fig.add_trace(go.Scatter(
-            x=df["time"],
-            y=df[channel],
-            name=p
-        ))
+
+
+        fig.add_trace(
+
+            go.Scatter(
+
+                x=df["time"],
+
+                y=df[channel],
+
+                name=p
+
+            )
+
+        )
+
+
 
     return fig
 
 
+
 # =========================
-# MAIN PIPELINE (DTW + CLUSTER + UMAP)
+# MAIN PIPELINE
 # =========================
+
 @app.callback(
-    Output("output", "children"),
-    Output("umap-plot", "figure"),
-    Input("run", "n_clicks"),
-    State("patient-selector", "value"),
-    State("channel-dropdown", "value"),
-    State("mode", "value")
+
+    Output(
+        "output",
+        "children"
+    ),
+
+    Output(
+        "umap-plot",
+        "figure"
+    ),
+
+    Input(
+        "run",
+        "n_clicks"
+    ),
+
+    State(
+        "patient-selector",
+        "value"
+    ),
+
+    State(
+        "channel-dropdown",
+        "value"
+    ),
+
+    State(
+        "mode",
+        "value"
+    ),
+
+    State(
+        "cluster-method",
+        "value"
+    )
 )
-def run(n, patients, channel, mode):
+
+
+def run(
+    n,
+    patients,
+    channel,
+    mode,
+    cluster_method
+):
+
 
     if not n:
         return "", {}
 
+
+
     if not patients or not channel:
         return "Select inputs", {}
 
+
+
     # =========================
-    # STEP 1: DTW
+    # DTW
     # =========================
+
     ids, matrix = build_similarity_matrix(
-        patients, channel, f"{mode}s"
+
+        patients,
+
+        channel,
+
+        f"{mode}s"
+
     )
+    print("==============================")
+    print("DTW DISTANCE DEBUG")
+
+    print("Number of patients:", len(ids))
+
+    positive = matrix[matrix > 0]
+
+    print("Minimum distance:", positive.min())
+    print("Maximum distance:", positive.max())
+    print("Mean distance:", positive.mean())
+    print("Median distance:", np.median(positive))
+
+    print("==============================")
 
     if len(ids) < 2:
         return "Not enough data", {}
 
-    # =========================
-    # STEP 2: CLUSTERING
-    # =========================
-    clusters, labels = hierarchical_clustering(matrix, ids)
+
 
     # =========================
-    # STEP 3: UMAP
+    # CLUSTERING
     # =========================
-    embedding = compute_umap(matrix)
+
+
+    if cluster_method == "hierarchical":
+
+
+        clusters, labels = hierarchical_clustering(
+
+            matrix,
+
+            ids
+
+        )
+
+
+    else:
+
+
+        clusters, labels = dbscan_clustering(
+
+            matrix,
+
+            ids,
+
+            eps=1500,
+
+            min_samples=3
+
+        )
+
+
 
     # =========================
-    # TEXT OUTPUT
+    # UMAP
     # =========================
-    out = ["=== CLUSTERS ===\n"]
+
+    embedding = compute_umap(
+        matrix
+    )
+
+
+
+    # =========================
+    # OUTPUT
+    # =========================
+
+
+    out = [
+
+        f"=== METHOD: {cluster_method.upper()} ===\n"
+
+    ]
+
 
     for k, v in clusters.items():
-        out.append(f"Cluster {k}: {', '.join(v)}")
+
+        out.append(
+
+            f"Cluster {k}: {', '.join(v)}"
+
+        )
+
+
 
     # =========================
-    # COLOR MAP (OPTION A)
+    # UMAP
     # =========================
-    unique_labels = list(sorted(set(labels)))
 
-    color_map = {
-        label: idx for idx, label in enumerate(unique_labels)
-    }
 
-    # =========================
-    # UMAP PLOT (COLORED)
-    # =========================
     fig = go.Figure()
+
+
 
     for i, pid in enumerate(ids):
 
+
         cluster_id = labels[i]
 
-        fig.add_trace(go.Scatter(
-            x=[embedding[i, 0]],
-            y=[embedding[i, 1]],
-            mode="markers+text",
-            text=[pid],
-            textposition="top center",
-            marker=dict(size=12),
-            name=f"Cluster {cluster_id}",
-            showlegend=True
-        ))
+
+        fig.add_trace(
+
+            go.Scatter(
+
+                x=[
+                    embedding[i,0]
+                ],
+
+                y=[
+                    embedding[i,1]
+                ],
+
+                mode="markers+text",
+
+                text=[
+                    pid
+                ],
+
+                textposition="top center",
+
+                marker=dict(
+                    size=12
+                ),
+
+                name=f"Cluster {cluster_id}"
+
+            )
+
+        )
+
+
 
     fig.update_layout(
-        title="ICU Patient Similarity Map (UMAP)",
-        xaxis_title="UMAP-1",
-        yaxis_title="UMAP-2"
+
+        title=
+        "ICU Patient Similarity Map (UMAP)",
+
+        xaxis_title=
+        "UMAP-1",
+
+        yaxis_title=
+        "UMAP-2"
+
     )
 
+
     return "\n".join(out), fig
+
 
 
 # =========================
 # RUN
 # =========================
+
 if __name__ == "__main__":
-    app.run(debug=True)
+
+    app.run(
+        debug=True
+    )
